@@ -1,0 +1,7 @@
+---
+- hosts: roost-demo
+  roles:
+    - role: amazon-linux-apache
+      tags: amazon-linux-apache
+    - role: amazon-linux-jekyll-autodeploy
+      tags: amazon-linux-jekyll-autodeploy

@@ -1,0 +1,35 @@
+<Directory "/var/www/production">
+Options Indexes FollowSymLinks
+AllowOverride All
+Require all granted
+</Directory>
+
+{% if staging_domain is defined %}
+<Directory "/var/www/staging">
+Options Indexes FollowSymLinks
+AllowOverride All
+Require all granted
+</Directory>
+{% endif %}
+
+<VirtualHost *:80>
+DocumentRoot "/var/www/production"
+ServerName "{{ production_domain }}"
+{% if production_domain_aliases is defined %}
+{% for alias in production_domain_aliases %}
+ServerAlias "{{ alias }}"
+{% endfor %}
+{% endif %}
+</VirtualHost>
+
+{% if staging_domain is defined %}
+<VirtualHost *:80>
+DocumentRoot "/var/www/staging"
+ServerName "{{ staging_domain }}"
+{% if staging_domain_aliases is defined %}
+{% for alias in staging_domain_aliases %}
+ServerAlias "{{ alias }}"
+{% endfor %}
+{% endif %}
+</VirtualHost>
+{% endif %}

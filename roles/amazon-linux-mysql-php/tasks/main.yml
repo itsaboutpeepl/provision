@@ -1,0 +1,107 @@
+---
+- name: Set hostname
+  become: true
+  hostname:
+    name: "{{ inventory_hostname }}"
+    use: redhat
+
+- name: Install Amazon Linux Extras
+  become: yes
+  yum:
+    name: amazon-linux-extras
+    state: installed
+    lock_timeout: 180
+
+- name: Install MariaDB
+  become: yes
+  yum:
+    name: mariadb-server
+    state: installed
+    lock_timeout: 180
+
+- name: Install PHP, and MariaDB PHP bindings, via Amazon Linux Extras
+  become: yes
+  command: amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+  args:
+    creates: /usr/bin/php
+
+- name: Install Python MySQL bindings
+  become: yes
+  yum:
+    name: MySQL-python
+    state: installed
+    lock_timeout: 180
+
+- name: Start MariaDB
+  become: yes
+  systemd:
+    state: started
+    name: mariadb
+
+- name: Set MariaDB to start at boot
+  become: yes
+  systemd:
+    enabled: yes
+    name: mariadb
+
+# Sigh. This doesn't work, because it sets the password for the root@localhost user but can't then log in to the root@127.0.0.1 or root@::1 users.
+#
+# - name: Set mysql root user password
+#   become: yes
+#   mysql_user:
+#     name: root
+#     password: "{{ mysql_root_password }}"
+#     host: "localhost"
+#     check_implicit_admin: yes
+#     state: present
+#   with_items:
+#     - "localhost"
+#     - "127.0.0.1"
+#     - "::1"
+#
+# - name: Flush MySQL privileges
+#   become: yes
+#   command: 'mysql -ne "{{ item }}"'
+#   with_items:
+#     - FLUSH PRIVILEGES
+
+- name: Set myself root user password
+  become: yes
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - UPDATE mysql.user SET Password=PASSWORD('{{ mysql_root_password }}') WHERE User='root';
+    - FLUSH PRIVILEGES
+  changed_when: False
+
+- name: Save mysql root login details in /root/.my.cnf
+  become: yes
+  template:
+    src: my.cnf.j2
+    dest: /root/.my.cnf
+    owner: root
+    group: root
+    mode: 0600
+
+- name: Remove anonymous mysql users
+  become: yes
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DELETE FROM mysql.user WHERE User=''
+    - FLUSH PRIVILEGES
+  changed_when: False
+
+- name: Disallow remote mysql root logins
+  become: yes
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1')
+    - FLUSH PRIVILEGES
+  changed_when: False
+
+- name: Remove mysql test database
+  become: yes
+  command: 'mysql -ne "{{ item }}"'
+  with_items:
+    - DROP DATABASE IF EXISTS test
+    - DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%'
+  changed_when: False
