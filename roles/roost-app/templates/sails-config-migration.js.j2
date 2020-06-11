@@ -1,0 +1,14 @@
+module.exports = {
+
+    datastores: {
+        default: {
+            adapter: require('sails-mysql'),
+            url: 'mysql://{{ mysql_production_user }}:{{ mysql_production_password }}@localhost:3306/{{ mysql_production_database }}',
+        },
+    },
+
+    models: {
+      migrate: 'alter',
+    },
+
+};

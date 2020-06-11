@@ -26,44 +26,41 @@ You will also want to edit `hosts.yml` to contain the names, IP addresses, and l
 
 If your servers require key pairs for SSH authentication (like EC2 servers do) then you can put the key pair files into the `keys` directory.
 
-For example, if we were hosting the Roost website off an EC2 instance with the IP address `52.52.52.52`, I’d put the key file into `keys`, and I’d modify `hosts.yml` like so:
+Here’s an example `hosts.yml` file, containing details about a single machine, which is an Amazon EC2 instance, with SSH keys stored in `./keys/example.pem`:
 
     all:
       hosts:
-        roost-web:
-          ansible_ssh_host: 52.52.52.52
-          ansible_user: ec2-user
-          ansible_ssh_private_key_file: keys/my-keyfile.pem
-          [...]
+        roost-app:
+          ansible_ssh_host: example.roostnow.co.uk
+          ansible_user: ubuntu
+          ansible_ssh_private_key_file: keys/example.pem
+          ansible_ssh_extra_args: "-o IdentitiesOnly=yes"
+          production_domain: example.roostnow.co.uk
+          mysql_admin_user: admin
+          mysql_admin_password: REPLACEME
+          mysql_production_user: roost-app
+          mysql_production_password: REPLACEME
+          mysql_production_database: roostapp
+          ssl_contact_email: example@roostnow.co.uk
+          sails_contact_email: example@roostnow.co.uk
 
-In the above example, because we’ve given that machine a name of `roost-web`, it will be provisioned with the roles defined in `playbooks/roost-web.yml` – namely, it will be set up as an Amazon Linux 2 LAMP server, ready for you to manually install Wordpress.
+In the above example, because we’ve given that machine an “alias” of `roost-app`, it will be provisioned with the roles defined in `playbooks/roost-app.yml`.
+
+Your `hosts.yml` file can define settings for multiple hosts, eg:
+
+    all:
+      hosts:
+        roost-app:
+          [...]
+        roost-web:
+          [...]
+        fuse-validator:
+          [...]
 
 ## To provision a machine (or “host”)
 
-Assuming you’ve set up the machine’s details in `hosts.yml`, you can provision it using any of the playbooks in the `playbooks` directory.
+Assuming you’ve set up the machine’s details in `hosts.yml`, with a matching playbook in the `playbooks` directory, you can run:
 
-For example:
+    ansible-playbook playbooks/roost-app.yml
 
-    ansible-playbook playbooks/roost-web.yml
-
-Sometimes, during testing, it can be useful to run just a single "role" out of a playbook. Here’s how you’d do that:
-
-    ansible-playbook playbooks/roost-web.yml --tags amazon-linux-wordpress
-
-## Roost-web: Manually setting up a Wordpress site
-
-As mentioned above, `roost-web` servers will get provisioned with:
-
-* Apache, serving two web directories (`/var/www/production` and `/var/www/staging`) on both HTTP and HTTPS
-* SSL certificates for the production and staging domains
-* MySQL, with `production` and `staging` databases, and a `wordpress` user
-* PHP
-
-It also installs the [wp-cli](https://wp-cli.org/) command line tool at `/usr/bin/wp`, to help you interact with Wordpress sites manually at the command line.
-
-If you wanted to install Wordpress into the `/var/www/staging` directory, you might do:
-
-    cd /var/www/staging
-    wp core download --locale=en_GB
-    wp config create --dbname=staging --dbuser=wordpress --dbpass={{ wp_mysql_password }}
-    wp core install --url={{ staging_domain }} --title='My lovely WordPress site' --admin_user='admin' --admin_password='changeme' --admin_email='joe@example.com' --skip-email
+This example would provision the `roost-app` host defined in `hosts.yml`, with the tasks defined in `playbooks/roost-app.yml`.

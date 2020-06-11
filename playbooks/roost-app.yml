@@ -1,0 +1,5 @@
+---
+- hosts: roost-app
+  roles:
+    - name: roost-app
+      tags: roost-app

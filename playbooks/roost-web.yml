@@ -1,9 +1,0 @@
----
-- hosts: roost-web
-  roles:
-    - name: amazon-linux-apache
-      tags: amazon-linux-apache
-    - name: amazon-linux-mysql-php
-      tags: amazon-linux-mysql-php
-    - name: amazon-linux-wordpress
-      tags: amazon-linux-wordpress
