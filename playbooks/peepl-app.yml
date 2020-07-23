@@ -1,0 +1,5 @@
+---
+- hosts: peepl-app
+  roles:
+    - name: peepl-app
+      tags: peepl-app

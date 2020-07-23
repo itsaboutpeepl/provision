@@ -1,0 +1,7 @@
+server {
+    listen 80;
+    listen 443 ssl;
+    root /var/www/production;
+    index index.html index.htm index.nginx-debian.html;
+    server_name {{ production_domain }} {% if production_domain_aliases is defined %}{{ production_domain_aliases | join(' ') }}{% endif %};
+}

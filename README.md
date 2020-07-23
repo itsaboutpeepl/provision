@@ -1,6 +1,6 @@
-# roost-provision
+# Peepl & Roost provisioning scripts
 
-Provision Roost servers using Ansible.
+Provision Peepl web servers using Ansible.
 
 ## Why Ansible?
 
@@ -52,9 +52,7 @@ Your `hosts.yml` file can define settings for multiple hosts, eg:
       hosts:
         roost-app:
           [...]
-        roost-web:
-          [...]
-        fuse-validator:
+        peepl-app:
           [...]
 
 ## To provision a machine (or “host”)
