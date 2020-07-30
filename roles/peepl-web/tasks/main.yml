@@ -1,0 +1,277 @@
+# https://github.com/do-community/ansible-playbooks/tree/master/lemp_ubuntu1804
+
+- name: Set hostname
+  become: true
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Disable Canonical "News" in SSH message of the day
+  become: true
+  lineinfile:
+    path: /etc/default/motd-news
+    regexp: "^ENABLED="
+    line: "ENABLED=0"
+
+
+# Nginx setup
+
+- name: Ensure Nginx is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: nginx
+    state: latest
+
+- name: "Create Nginx conf file for {{ production_domain }}"
+  become: true
+  template:
+    src: nginx.conf.j2
+    dest: "/etc/nginx/sites-available/{{ production_domain }}.conf"
+  when: production_domain is defined
+
+- name: "Enable {{ production_domain }} Nginx site"
+  become: true
+  file:
+    src: "/etc/nginx/sites-available/{{ production_domain }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ production_domain }}.conf"
+    state: link
+  when: production_domain is defined
+  notify: Restart Nginx
+
+- name: Remove "default" Nginx site
+  become: true
+  file:
+    path: "/etc/nginx/sites-enabled/default"
+    state: absent
+  notify: Restart Nginx
+
+
+
+# SSL certificates setup
+
+- name: Ensure Certbot and Certbox Nginx bindings are installed
+  become: true
+  apt:
+    update_cache: yes
+    pkg:
+    - certbot
+    - python3-certbot-nginx
+    state: latest
+
+- set_fact:
+    certbot_production_aliases: "-d {{ production_domain_aliases | join(' -d ') }}"
+  when: production_domain_aliases is defined
+
+- name: Create and install SSL certificate for production domain
+  become: yes
+  command: "certbot --non-interactive --agree-tos --nginx -d {{ production_domain }} {{ certbot_production_aliases | default('') }} --email {{ ssl_contact_email }} --redirect --expand"
+  # args:
+  #   creates: "/etc/letsencrypt/live/{{ production_domain }}/fullchain.pem"
+  notify: Restart Nginx
+
+
+
+# Static web server directories
+
+- name: "Add user '{{ ansible_user }}' to 'www-data' group"
+  become: yes
+  user:
+    name: "{{ ansible_user }}"
+    groups: www-data
+    append: yes
+
+- name: "Ensure everything in /var/www belongs to '{{ ansible_user }}:www-data'"
+  become: yes
+  file:
+    path: /var/www
+    state: directory
+    recurse: yes
+    owner: "{{ ansible_user }}"
+    group: www-data
+
+- name: Ensure directories in /var/www have 2775 permission
+  become: yes
+  file:
+    path: /var/www
+    state: directory
+    recurse: yes
+    mode: u=rwX,g=srX,o=rX
+
+- name: Create production directory in /var/www
+  file:
+    path: "/var/www/production"
+    state: directory
+  when: production_domain is defined
+
+
+
+# UFW firewall setup
+
+- name: Ensure UFW is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: ufw
+    state: latest
+
+- name: Allow SSH connections through UFW firewall
+  become: true
+  ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: Allow HTTP/HTTPS connections through UFW firewall
+  become: true
+  ufw:
+    rule: allow
+    name: Nginx Full
+
+- name: Start UFW
+  become: true
+  ufw:
+    state: enabled
+
+
+
+# PHP setup
+
+- name: Ensure ondrej/php apt repository is added (for WordPress PHP 7.4 recommendation)
+  become: true
+  apt_repository:
+    repo: ppa:ondrej/php
+    state: present
+
+- name: Ensure PHP 7.4, PHP-FPM, and common PHP modules are installed
+  become: true
+  apt:
+    update_cache: yes
+    name:
+      - php7.4
+      - php7.4-fpm
+      - php7.4-mysql
+      - php7.4-gd
+      - php7.4-curl
+      - php7.4-mbstring
+      - php7.4-soap
+      - php7.4-xml
+  notify:
+    - Restart Nginx
+    - Restart PHP-FPM
+
+- name: Ensure WordPress-friendly php.ini settings are in place
+  become: true
+  template:
+    src: "php.ini.j2"
+    dest: "/etc/php/7.4/fpm/conf.d/99-itsaboutpeepl.ini"
+  notify:
+    - Restart PHP-FPM
+
+
+
+# MySQL setup
+
+- name: Ensure PyMySQL is installed (for Ansible communication with database)
+  become: true
+  apt:
+    update_cache: yes
+    name: python3-pymysql
+    state: latest
+
+- name: Ensure software-properties-common is installed (for managing apt keys and repositories)
+  become: true
+  apt:
+    update_cache: yes
+    name: software-properties-common
+    state: latest
+
+- name: Ensure MariaDB key has been added to apt
+  become: true
+  apt_key:
+    url: https://mariadb.org/mariadb_release_signing_key.asc
+    state: present
+
+- name: Ensure MariaDB 10.4 repository has been added to apt
+  become: true
+  apt_repository:
+    repo: deb [arch=amd64,arm64,ppc64el] http://mirror.hosting90.cz/mariadb/repo/10.4/ubuntu bionic main
+    state: present
+
+- name: Ensure MariaDB (MySQL) is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: mariadb-server
+    state: latest
+
+- name: Start MariaDB (MySQL)
+  become: yes
+  systemd:
+    state: started
+    enabled: yes
+    name: mariadb
+
+- name: Create MySQL admin user (via root socket login)
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  become: yes
+  mysql_user:
+    name: "{{ mysql_admin_user }}"
+    host: localhost
+    password: "{{ mysql_admin_password }}"
+    priv: "*.*:ALL,GRANT"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    check_implicit_admin: yes
+
+- name: "Save MySQL admin login details to {{ ansible_user }} home directory"
+  template:
+    src: my.cnf.j2
+    dest: "/home/{{ ansible_user }}/.my.cnf"
+
+- name: Remove anonymous MySQL user accounts
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  mysql_user:
+    name: ''
+    host_all: yes
+    state: absent
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Remove MySQL test database
+  mysql_db:
+    name: test
+    state: absent
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Create production MySQL database
+  mysql_db:
+    name: "{{ mysql_production_database }}"
+    state: present
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Create production MySQL user
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  mysql_user:
+    name: "{{ mysql_production_user }}"
+    password: "{{ mysql_production_password }}"
+    priv: "{{ mysql_production_database }}.*:ALL"
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+
+
+# wp-cli setup
+
+- name: Ensure wp-cli installed
+  become: yes
+  get_url:
+    url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    dest: /usr/local/bin/wp
+    mode: +x
+
+
+
+# Manually:
+# Use wp-cli to download WordPress to /var/www/production
+# Install Git, and clone the theme repo to ~/<something>
+# Set up a symlink from the theme repo to /var/ww.../wp-content/themes

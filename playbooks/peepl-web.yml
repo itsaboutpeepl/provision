@@ -1,0 +1,5 @@
+---
+- hosts: peepl-web
+  roles:
+    - name: peepl-web
+      tags: peepl-web
