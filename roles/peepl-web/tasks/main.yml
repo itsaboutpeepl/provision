@@ -261,6 +261,88 @@
 
 
 
+# Sendmail setup
+# https://docs.aws.amazon.com/ses/latest/DeveloperGuide/send-email-sendmail.html
+# https://github.com/mcoia/eg-docker/blob/32df0cac155590e2ad1e1f52ff7073de5358e350/docker_builds/ksl/install_evergreen.yml#L462
+
+- name: Ensure sendmail is installed
+  become: true
+  apt:
+    update_cache: yes
+    name:
+      - sasl2-bin
+      - sendmail
+      - sendmail-cf
+      - m4
+    state: latest
+
+- name: Ensure SMTP auth settings are in place
+  become: true
+  template:
+    src: "sendmail-authinfo.j2"
+    dest: "/etc/mail/authinfo"
+
+- name: Ensure SMTP relay enabled
+  become: true
+  lineinfile:
+    path: /etc/mail/access
+    line: "Connect:{{ sendmail_smtp_server }} RELAY"
+
+- name: Ensure SMTP relay config in place
+  become: true
+  blockinfile:
+    path: /etc/mail/sendmail.mc
+    marker: 'dnl # ANSIBLE MANAGED BLOCK'
+    insertbefore: MAILER_DEFINITIONS
+    block: |
+      define(`SMART_HOST', `{{ sendmail_smtp_server }}')dnl
+      define(`RELAY_MAILER_ARGS', `TCP $h 587')dnl
+      define(`confAUTH_MECHANISMS', `LOGIN PLAIN')dnl
+      define(`confDOMAIN_NAME', `{{ sendmail_smtp_domain }}')dnl
+      FEATURE(`authinfo', `hash -o /etc/mail/authinfo.db')dnl
+      MASQUERADE_AS(`{{ sendmail_smtp_domain }}')dnl
+      FEATURE(masquerade_envelope)dnl
+      FEATURE(masquerade_entire_domain)dnl
+      include(`/etc/mail/tls/starttls.m4')dnl
+      include(`/etc/mail/sasl/sasl.m4')dnl
+
+- name: Ensure SMTP submit config in place
+  become: true
+  blockinfile:
+    path: /etc/mail/submit.mc
+    block: |
+      define(`confDOMAIN_NAME', `{{ sendmail_smtp_domain }}')dnl
+      include(`/etc/mail/tls/starttls.m4')dnl
+      include(`/etc/mail/sasl/sasl.m4')dnl
+
+- name: Rebuild sendmail config
+  become: true
+  shell:
+    chdir: /etc/mail
+    cmd: "{{ item }}"
+  args:
+    warn: false
+  loop:
+    - makemap hash authinfo.db < authinfo
+    - makemap hash access < access
+    # - m4 sendmail.mc > sendmail.cf
+    # - m4 submit.mc > submit.cf
+  notify:
+    - Restart Sendmail
+
+- name: Configure sendmail
+  become: true
+  expect:
+    command: sendmailconfig
+    responses:
+      Question:
+        - Configure sendmail with the existing /etc/mail/sendmail.conf? [Y]: y
+        - Configure sendmail with the existing /etc/mail/sendmail.mc? [Y]: y
+        - Reload the running sendmail now with the new configuration? [Y]: y
+    timeout: 30
+
+
+
 # wp-cli setup
 
 - name: Ensure wp-cli installed

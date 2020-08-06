@@ -22,3 +22,9 @@
   service:
     name: php7.4-fpm
     state: restarted
+
+- name: Restart Sendmail
+  become: yes
+  service:
+    name: sendmail
+    state: restarted
