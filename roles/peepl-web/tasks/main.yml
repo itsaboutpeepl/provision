@@ -272,7 +272,53 @@
 
 
 
-# Manually:
-# Use wp-cli to download WordPress to /var/www/production
-# Install Git, and clone the theme repo to ~/<something>
-# Set up a symlink from the theme repo to /var/ww.../wp-content/themes
+# WordPress setup
+# TODO: This all assumes {{ production_domain }} is defined.
+
+- name: Ensure Git is installed (for cloning the theme repo)
+  become: true
+  apt:
+    update_cache: yes
+    name: git
+    state: latest
+
+- name: Ensure peepl-web Git repo is checked out at ~/peepl-web
+  git:
+    repo: https://github.com/itsaboutpeepl/peepl-web.git
+    dest: /home/ubuntu/peepl-web
+
+- name: Check whether WordPress exists at /var/www/production
+  stat:
+     path: /var/www/production/wp-config.php
+  register: wp_config
+
+- name: Download WordPress into /var/www/production
+  shell: wp core download --locale=en_GB
+  args:
+    chdir: /var/www/production
+    creates: /var/www/production/index.php
+  when: wp_config.stat.exists == false
+
+- name: Create WordPress config
+  shell: "wp config create --dbname='{{ mysql_production_database }}' --dbuser='{{ mysql_production_user }}' --dbpass='{{ mysql_production_password }}' --force"
+  args:
+    chdir: /var/www/production
+    creates: /var/www/production/wp-config.php
+  when: wp_config.stat.exists == false
+
+- name: Set up WordPress
+  shell: "wp core install --url='{{ production_domain }}' --title='{{ wordpress_site_title }}' --admin_user='{{ wordpress_admin_user }}' --admin_password='{{ wordpress_admin_password }}' --admin_email='{{ wordpress_admin_email }}' --skip-email"
+  args:
+    chdir: /var/www/production
+  when: wp_config.stat.exists == false
+
+- name: Ensure peepl-theme is symlinked into wp-content/themes
+  file:
+    state: link
+    src: /home/ubuntu/peepl-web/peepl-theme
+    dest: /var/www/production/wp-content/themes/peepl-theme
+
+- name: Ensure peepl-theme is activated in WordPress
+  shell: "wp theme activate peepl-theme"
+  args:
+    chdir: /var/www/production
