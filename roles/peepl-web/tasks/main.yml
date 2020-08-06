@@ -13,6 +13,7 @@
     line: "ENABLED=0"
 
 
+
 # Nginx setup
 
 - name: Ensure Nginx is installed
@@ -80,22 +81,22 @@
     groups: www-data
     append: yes
 
-- name: "Ensure everything in /var/www belongs to '{{ ansible_user }}:www-data'"
+- name: "Ensure everything in /var/www belongs to 'www-data:www-data'"
   become: yes
   file:
     path: /var/www
     state: directory
     recurse: yes
-    owner: "{{ ansible_user }}"
+    owner: www-data
     group: www-data
 
-- name: Ensure directories in /var/www have 2775 permission
+- name: Ensure directories in /var/www have 775 permission
   become: yes
   file:
     path: /var/www
     state: directory
     recurse: yes
-    mode: u=rwX,g=srX,o=rX
+    mode: u=rwX,g=srwX,o=rX
 
 - name: Create production directory in /var/www
   file:
