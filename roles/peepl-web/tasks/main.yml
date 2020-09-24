@@ -23,6 +23,12 @@
     name: nginx
     state: latest
 
+- name: "Copy across global Nginx config options"
+  become: true
+  template:
+    src: nginx-max-body-size.conf.j2
+    dest: "/etc/nginx/conf.d/01-max-body-size.conf"
+
 - name: "Create Nginx conf file for {{ production_domain }}"
   become: true
   template:
