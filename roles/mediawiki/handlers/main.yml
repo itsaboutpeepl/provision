@@ -1,0 +1,31 @@
+---
+- name: Reload Nginx
+  become: yes
+  service:
+    name: nginx
+    state: reloaded
+
+- name: Restart Nginx
+  become: yes
+  service:
+    name: nginx
+    state: restarted
+
+- name: Reload PHP-FPM
+  become: yes
+  service:
+    name: php7.4-fpm
+    state: reloaded
+
+- name: Restart PHP-FPM
+  become: yes
+  service:
+    name: php7.4-fpm
+    state: restarted
+
+- name: Run MediaWiki update script
+  become: yes
+  command:
+    chdir: "{{ mediawiki_path }}"
+    cmd: >
+      php maintenance/update.php --quick

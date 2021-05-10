@@ -1,0 +1,18 @@
+---
+- hosts: wiki
+  vars:
+    mediawiki_archive_url: https://releases.wikimedia.org/mediawiki/1.35/mediawiki-1.35.2.tar.gz # URL to the remote archive
+    mediawiki_known_filename: RELEASE-NOTES-1.35 # a known file within the archive
+    mediawiki_unarchive_location: '/var/www' # where to unpack to
+    mediawiki_path: '/var/www/mediawiki-1.35.2' # full path once unpacked
+    mediawiki_site_name: Peepl Wiki
+
+  roles:
+    - name: generic-peepl-instance
+      tags: generic-peepl-instance
+    - name: nginx-php-mysql-ssl-web-server
+      tags: nginx-php-mysql-ssl-web-server
+    - name: sendmail
+      tags: sendmail
+    - name: mediawiki
+      tags: mediawiki
