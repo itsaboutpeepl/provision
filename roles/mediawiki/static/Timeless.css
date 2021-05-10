@@ -1,0 +1,33 @@
+@import('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&#038;family=Lato:ital,wght@0,400;0,700;1,400;1,700&#038;display=swap');
+
+#mw-content-container {
+    background-image: none;
+}
+
+.mw-wiki-logo {
+    background-size: contain;
+}
+
+body {
+    font-family: Lato; font-size: 1em;
+}
+
+#mw-header,
+.mw-body h1,
+.mw-body h2,
+.mw-body h3,
+.mw-body h4,
+.mw-body h5,
+.mw-body h6,
+.mw-body dt {
+    font-family: Montserrat;
+}
+
+#p-logo-text a {
+    font-variant: none;
+}
+
+#p-logo-text a,
+#personal h2 {
+    font-family: inherit;
+}
