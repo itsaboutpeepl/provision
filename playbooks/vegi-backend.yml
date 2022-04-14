@@ -1,0 +1,13 @@
+---
+- hosts: vegi-backend
+  # Get Github credentials for cloning repo
+  vars_prompt: 
+    - name: "githubuser" 
+      prompt: "Enter your github username" 
+      private: no 
+    - name: "githubpassword" 
+      prompt: "Enter your github password" 
+      private: yes 
+  roles:
+    - name: vegi-backend
+      tags: vegi-backend
