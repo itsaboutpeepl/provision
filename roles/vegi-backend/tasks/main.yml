@@ -206,12 +206,6 @@
 
 # Set up Redis
 
-- name: Set up Redis repo
-  become: true
-  shell: |
-    curl https://packages.redis.io/gpg | sudo apt-key add -
-    echo "deb https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
-
 - name: Install redis
   become: true
   apt:
@@ -289,6 +283,14 @@
   community.general.npm:
     name: pm2
     global: yes
+  
+- name: Install "sass" node.js package globally.
+  become: true
+  community.general.npm:
+    name: sass
+    global: yes
+
+# - name: Run the sails app in dev mode first to seed the database.
 
 
 
