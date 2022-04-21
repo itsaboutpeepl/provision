@@ -1,0 +1,303 @@
+# https://github.com/do-community/ansible-playbooks/tree/master/lemp_ubuntu1804
+
+- name: Set hostname
+  become: true
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Disable Canonical "News" in SSH message of the day
+  become: true
+  lineinfile:
+    path: /etc/default/motd-news
+    regexp: "^ENABLED="
+    line: "ENABLED=0"
+
+
+
+# Nginx setup
+
+- name: Ensure Nginx is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: nginx
+    state: latest
+
+- name: "Create Nginx conf file for {{ production_domain }}"
+  become: true
+  template:
+    src: nginx.conf.j2
+    dest: "/etc/nginx/sites-available/{{ production_domain }}.conf"
+  when: production_domain is defined
+
+- name: "Enable {{ production_domain }} Nginx site"
+  become: true
+  file:
+    src: "/etc/nginx/sites-available/{{ production_domain }}.conf"
+    dest: "/etc/nginx/sites-enabled/{{ production_domain }}.conf"
+    state: link
+  when: production_domain is defined
+  notify: Restart Nginx
+
+- name: Remove "default" Nginx site
+  become: true
+  file:
+    path: "/etc/nginx/sites-enabled/default"
+    state: absent
+  notify: Restart Nginx
+
+
+
+# SSL certificates setup
+
+- name: Ensure Certbot and Certbot Nginx bindings are installed
+  become: true
+  apt:
+    update_cache: yes
+    pkg:
+    - certbot
+    - python3-certbot-nginx
+    state: latest
+
+- set_fact:
+    certbot_production_aliases: "-d {{ production_domain_aliases | join(' -d ') }}"
+  when: production_domain_aliases is defined
+
+- name: Create and install SSL certificate for production domain
+  become: yes
+  command: "certbot --non-interactive --agree-tos --nginx -d {{ production_domain }} {{ certbot_production_aliases | default('') }} --email {{ ssl_contact_email }} --redirect"
+  # args:
+  #   creates: "/etc/letsencrypt/live/{{ production_domain }}/fullchain.pem"
+  notify: Restart Nginx
+
+- set_fact:
+    certbot_staging_aliases: "-d {{ staging_domain_aliases | join(' -d ') }}"
+  when: staging_domain_aliases is defined
+
+- name: Create and install SSL certificate for staging domain
+  become: yes
+  command: "certbot --non-interactive --agree-tos --nginx -d {{ staging_domain }} {{ certbot_staging_aliases | default('') }} --email {{ ssl_contact_email }} --redirect"
+  when: staging_domain is defined
+  # args:
+  #   creates: "/etc/letsencrypt/live/{{ staging_domain }}/fullchain.pem"
+  notify: Restart Nginx
+
+
+
+# UFW firewall setup
+
+- name: Ensure UFW is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: ufw
+    state: latest
+
+- name: Allow SSH connections through UFW firewall
+  become: true
+  ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: Allow HTTP/HTTPS connections through UFW firewall
+  become: true
+  ufw:
+    rule: allow
+    name: Nginx Full
+
+- name: Start UFW
+  become: true
+  ufw:
+    state: enabled
+
+
+
+# MySQL setup
+
+- name: Ensure PyMySQL is installed (for Ansible communication with database)
+  become: true
+  apt:
+    update_cache: yes
+    name: python3-pymysql
+    state: latest
+
+- name: Ensure software-properties-common is installed (for managing apt keys and repositories)
+  become: true
+  apt:
+    update_cache: yes
+    name: software-properties-common
+    state: latest
+
+- name: Ensure MariaDB key has been added to apt
+  become: true
+  apt_key:
+    url: https://mariadb.org/mariadb_release_signing_key.asc
+    state: present
+
+- name: Ensure MariaDB 10.4 repository has been added to apt
+  become: true
+  apt_repository:
+    repo: deb [arch=amd64,arm64,ppc64el] http://mirror.hosting90.cz/mariadb/repo/10.4/ubuntu bionic main
+    state: present
+
+- name: Ensure MariaDB (MySQL) is installed
+  become: true
+  apt:
+    update_cache: yes
+    name: mariadb-server
+    state: latest
+
+- name: Start MariaDB (MySQL)
+  become: yes
+  systemd:
+    state: started
+    enabled: yes
+    name: mariadb
+
+- name: Create MySQL admin user (via root socket login)
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  become: yes
+  mysql_user:
+    name: "{{ mysql_admin_user }}"
+    host: localhost
+    password: "{{ mysql_admin_password }}"
+    priv: "*.*:ALL,GRANT"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    check_implicit_admin: yes
+
+- name: "Save MySQL admin login details to {{ ansible_user }} home directory"
+  template:
+    src: my.cnf.j2
+    dest: "/home/{{ ansible_user }}/.my.cnf"
+
+- name: Remove anonymous MySQL user accounts
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  mysql_user:
+    name: ''
+    host_all: yes
+    state: absent
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Remove MySQL test database
+  mysql_db:
+    name: test
+    state: absent
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Create production MySQL database
+  mysql_db:
+    name: "{{ mysql_production_database }}"
+    state: present
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+- name: Create production MySQL user
+  no_log: True # Ansible WARNs us if we don’t disable logging while editing a MySQL user
+  mysql_user:
+    name: "{{ mysql_production_user }}"
+    password: "{{ mysql_production_password }}"
+    priv: "{{ mysql_production_database }}.*:ALL"
+    login_user: "{{ mysql_admin_user }}"
+    login_password: "{{ mysql_admin_password }}"
+
+
+
+# Set up Redis
+
+- name: Install redis
+  become: true
+  apt:
+    name: redis-server
+    update_cache: yes
+  notify:
+    - Enable Redis
+
+- name: Set redis server pid file
+  become: true
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "^pidfile"
+    line: "pidfile /var/run/redis/redis-server.pid"
+  notify:
+    - Restart Redis
+
+
+
+# Clone the code
+
+- name: Ensure Git is installed
+  become: yes
+  apt:
+    update_cache: yes
+    name: git
+    state: latest
+
+- name: Clone the peepl-eat-api Git repo
+  git:
+    repo: "https://{{ githubuser | urlencode }}:{{ githubpassword | urlencode }}@github.com/itsaboutpeepl/peepl-eat-api.git"
+    dest: "/home/{{ ansible_user }}/peepl-eat-api"
+    version: cafe-laziz
+    force: yes
+
+- name: Ensure remote URL does not contain credentials
+  git_config:
+    name: remote.origin.url
+    value: https://github.com/privrepo.git
+    scope: local
+    repo: "/home/{{ ansible_user }}/peepl-eat-api"
+
+
+
+# Install Nodejs
+
+- name: "Add nodejs apt key"
+  become: true
+  apt_key:
+    url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+    state: present
+
+- name: Add Nodejs repo
+  become: true
+  shell: |
+    curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+
+- name: "Install nodejs"
+  become: true
+  apt:
+    update_cache: yes
+    name: nodejs
+    state: present
+
+
+
+# Install npm modules
+- name: Install packages based on package.json.
+  become: true
+  community.general.npm:
+    path: "/home/{{ ansible_user }}/peepl-eat-api"
+
+- name: Install "pm2" node.js package globally.
+  become: true
+  community.general.npm:
+    name: pm2
+    global: yes
+  
+- name: Install "sass" node.js package globally.
+  become: true
+  community.general.npm:
+    name: sass
+    global: yes
+
+# - name: Run the sails app in dev mode first to seed the database.
+
+
+
+# Run the app
+- name: Start/reload server
+  command: 'pm2 startOrReload ecosystem.config.js'
+  args:
+    chdir: /home/{{ ansible_user }}/peepl-eat-api
+  environment:
+    # NODE_ENV: "production"
