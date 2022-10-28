@@ -1,0 +1,167 @@
+- name: Ensure PHP 7.4, PHP-FPM, and MediaWiki’s PHP requirements installed
+  become: true
+  apt:
+    update_cache: yes
+    name:
+      - php7.4
+      - php7.4-fpm
+      - php7.4-mysql
+      - php7.4-gd
+      - php7.4-json
+      - php7.4-mbstring
+      - php7.4-xml
+  notify:
+    - Restart Nginx
+    - Restart PHP-FPM
+
+- name: 'Download and unpack mediawiki to {{ mediawiki_path }}'
+  become: true
+  unarchive:
+    remote_src: yes
+    src: "{{ mediawiki_archive_url }}"
+    dest: "{{ mediawiki_unarchive_location }}"
+    creates: "{{ mediawiki_path }}"
+    owner: "www-data"
+    group: "www-data"
+    mode: "0775"
+
+# https://www.mediawiki.org/wiki/Manual:Install.php
+- name: Run mediawiki install script to create LocalSettings
+  become: true
+  command:
+    chdir: "{{ mediawiki_path }}"
+    cmd: >
+      php maintenance/install.php
+      --confpath="{{ mediawiki_path }}/"
+      --dbtype="mysql"
+      --dbserver="localhost"
+      --dbname="{{ mysql_production_database }}"
+      --dbuser="{{ mysql_production_user }}"
+      --dbpass="{{ mysql_production_password }}"
+      --server="https://{{ production_domain }}"
+      --scriptpath=""
+      --lang="en"
+      --pass="{{ mediawiki_admin_password }}"
+      "{{ mediawiki_site_name }}"
+      "{{ mediawiki_admin_user }}"
+    creates: "{{ mediawiki_path }}/LocalSettings.php"
+
+- name: Ensure basic customisations in LocalSettings
+  become: true
+  loop:
+    - regexp: '^[$]wgEmergencyContact'
+      line: '$wgEmergencyContact = "{{ mediawiki_contact_email }}";'
+    - regexp: '^[$]wgPasswordSender'
+      line: '$wgPasswordSender = "{{ mediawiki_contact_email }}";'
+    - regexp: '^[$]wgEnableUploads'
+      line: '$wgEnableUploads = true;'
+    - regexp: '^[$]wgDefaultSkin'
+      line: '$wgDefaultSkin = "timeless";'
+    - regexp: '^[$]wgArticlePath'
+      line: '$wgArticlePath = "/wiki/$1";'
+    - regexp: '^[$]wgUsePathInfo'
+      line: '$wgUsePathInfo = true;'
+    - regexp: '^[$]wgLogo'
+      line: '$wgLogo = "/skins/common/images/wiki-logo.svg";'
+    - regexp: '^[$]wgAllowSiteCSSOnRestrictedPages'
+      line: '$wgAllowSiteCSSOnRestrictedPages = true;'
+  lineinfile:
+    path: "{{ mediawiki_path }}/LocalSettings.php"
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+
+# VisualEditor currently has issues with private wikis and/or
+# wikis using a Short_URL. So, sadly, skip it for now.
+# https://www.mediawiki.org/wiki/Extension_talk:VisualEditor
+#
+# - name: Ensure VisualEditor is enabled
+#   become: true
+#   blockinfile:
+#     path: "{{ mediawiki_path }}/LocalSettings.php"
+#     marker: "# {mark} ANSIBLE MANAGED BLOCK: VisualEditor"
+#     block: |
+#       wfLoadExtension( 'VisualEditor' );
+#       $wgGroupPermissions['user']['writeapi'] = true;
+#       $wgDefaultUserOptions['visualeditor-editor'] = "visualeditor";
+#   notify:
+#     - Run MediaWiki update script
+
+- name: Ensure semi-visual WikiEditor is enabled
+  become: true
+  blockinfile:
+    path: "{{ mediawiki_path }}/LocalSettings.php"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK: WikiEditor"
+    block: |
+      wfLoadExtension( 'WikiEditor' );
+
+- name: Ensure wiki is private (invite only, no anonymous reading or editing)
+  become: true
+  blockinfile:
+    path: "{{ mediawiki_path }}/LocalSettings.php"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK: Private wiki"
+    block: |
+      $wgGroupPermissions['*']['read'] = false;
+      $wgGroupPermissions['*']['edit'] = false;
+      $wgGroupPermissions['*']['createaccount'] = false;
+      $wgGroupPermissions['user']['createaccount'] = true;
+
+- name: Ensure regular users can modify wiki interface
+  become: true
+  blockinfile:
+    path: "{{ mediawiki_path }}/LocalSettings.php"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK: Interface modification"
+    block: |
+      $wgGroupPermissions['user']['editinterface'] = true;
+      $wgGroupPermissions['user']['editsitecss'] = true;
+      $wgGroupPermissions['user']['editsitejs'] = true;
+      $wgGroupPermissions['user']['editsitejson'] = true;
+
+# https://www.mediawiki.org/wiki/Manual:Short_URL
+# https://www.mediawiki.org/wiki/Manual:Short_URL/wiki/Page_title_--_nginx_rewrite--root_access
+- name: Ensure {{ mediawiki_path }} document root and /wiki Short URL handling in nginx config
+  become: true
+  template:
+    src: nginx.conf.j2
+    dest: "/etc/nginx/sites-available/{{ production_domain }}.conf"
+  notify:
+    - Restart Nginx
+
+- name: Ensure common images directory exists
+  become: true
+  file:
+    path: "{{ mediawiki_path }}/skins/common/images"
+    state: directory
+
+- name: Ensure custom logo file is in place
+  become: true
+  copy:
+    src: "{{ role_path }}/static/wiki-logo.svg"
+    dest: "{{ mediawiki_path }}/skins/common/images/wiki-logo.svg"
+
+- name: Ensure everything in {{ mediawiki_path }} belongs to 'www-data:www-data'
+  become: true
+  file:
+    path: "{{ mediawiki_path }}"
+    state: directory
+    recurse: yes
+    owner: www-data
+    group: www-data
+
+- name: Ensure directories in {{ mediawiki_path }} are group-writeable (775 permissions)
+  become: true
+  file:
+    path: "{{ mediawiki_path }}"
+    state: directory
+    recurse: yes
+    mode: u=rwX,g=srwX,o=rX
+
+- name: Ensure there’s no /var/www/production directory any more
+  become: true
+  file:
+    path: /var/www/production
+    state: absent
+
+# Manual configuration steps:
+#
+# - Add `Special:CreateAccount|Invite a new user` to MediaWiki:Sidebar page
+# - Add font styles to `MediaWiki:Common.css`

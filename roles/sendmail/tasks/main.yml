@@ -1,0 +1,89 @@
+# Sendmail setup
+# https://docs.aws.amazon.com/ses/latest/DeveloperGuide/send-email-sendmail.html
+# https://github.com/mcoia/eg-docker/blob/32df0cac155590e2ad1e1f52ff7073de5358e350/docker_builds/ksl/install_evergreen.yml#L462
+
+- name: Test whether localhost.localdomain is already in /etc/hosts
+  become: true
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127[.]0[.]0[.]1.*localhost[.]localdomain'
+    state: absent
+  check_mode: yes
+  changed_when: false
+  register: fqdn_in_etc_hosts
+
+- name: Add localhost.localdomain to /etc/hosts
+  become: true
+  lineinfile:
+    path: /etc/hosts
+    backrefs: yes
+    regexp: "^(127[.]0[.]0[.]1.*)$"
+    line: '\1 localhost.localdomain' # single quotes here because of the leading backslash
+  when: not fqdn_in_etc_hosts.found
+
+- name: Ensure sendmail is installed
+  become: true
+  apt:
+    update_cache: yes
+    name:
+      - sasl2-bin
+      - sendmail
+      - sendmail-cf
+      - m4
+    state: latest
+
+- name: Ensure SMTP auth settings are in place
+  become: true
+  template:
+    src: "sendmail-authinfo.j2"
+    dest: "/etc/mail/authinfo"
+
+- name: Ensure SMTP relay enabled
+  become: true
+  lineinfile:
+    path: /etc/mail/access
+    line: "Connect:{{ sendmail_smtp_server }} RELAY"
+
+- name: Ensure SMTP relay config in place
+  become: true
+  blockinfile:
+    path: /etc/mail/sendmail.mc
+    marker: 'dnl # {mark} ANSIBLE MANAGED BLOCK: Amazon SES SMTP relay'
+    insertbefore: MAILER_DEFINITIONS
+    block: |
+      define(`SMART_HOST', `{{ sendmail_smtp_server }}')dnl
+      define(`RELAY_MAILER_ARGS', `TCP $h 587')dnl
+      define(`confAUTH_MECHANISMS', `LOGIN PLAIN')dnl
+      define(`confDOMAIN_NAME', `{{ sendmail_masquerade_domain }}')dnl
+      FEATURE(`authinfo', `hash -o /etc/mail/authinfo.db')dnl
+      MASQUERADE_AS(`{{ sendmail_masquerade_domain }}')dnl
+      FEATURE(masquerade_envelope)dnl
+      FEATURE(masquerade_entire_domain)dnl
+      include(`/etc/mail/tls/starttls.m4')dnl
+      include(`/etc/mail/sasl/sasl.m4')dnl
+
+- name: Rebuild sendmail config
+  become: true
+  shell:
+    chdir: /etc/mail
+    cmd: "{{ item }}"
+  args:
+    warn: false
+  loop:
+    - makemap hash authinfo.db < authinfo
+    - makemap hash access < access
+    - m4 sendmail.mc > sendmail.cf
+  notify:
+    - Restart Sendmail
+
+# Don’t think this manual step is required, but keeping for future reference just in case
+#
+# - name: Configure sendmail
+#   become: true
+#   expect:
+#     command: sendmailconfig
+#     responses:
+#       Configure sendmail with the existing \/etc\/mail\/sendmail\.conf\? \[Y\] : y
+#       Configure sendmail with the existing \/etc\/mail\/sendmail\.mc\? \[Y\] : y
+#       Reload the running sendmail now with the new configuration\? \[Y\] : y
+#     timeout: 240

@@ -1,0 +1,6 @@
+---
+- name: Restart Sendmail
+  become: yes
+  service:
+    name: sendmail
+    state: restarted

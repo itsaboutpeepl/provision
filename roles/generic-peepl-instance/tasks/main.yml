@@ -1,0 +1,30 @@
+- name: Set hostname
+  become: true
+  hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Test whether hostname is already in /etc/hosts
+  become: true
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127[.]0[.]0[.]1.*{{ inventory_hostname }}'
+    state: absent
+  check_mode: yes
+  changed_when: false
+  register: hostname_in_etc_hosts
+
+- name: Add hostname to /etc/hosts
+  become: true
+  lineinfile:
+    path: /etc/hosts
+    backrefs: yes
+    regexp: "^(127.0.0.1.*)$"
+    line: '\1 {{ inventory_hostname }}' # single quotes here because of the leading backslash
+  when: not hostname_in_etc_hosts.found
+
+- name: Disable Canonical "News" in SSH message of the day
+  become: true
+  lineinfile:
+    path: /etc/default/motd-news
+    regexp: "^ENABLED="
+    line: "ENABLED=0"
