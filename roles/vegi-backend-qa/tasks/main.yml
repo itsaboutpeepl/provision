@@ -140,7 +140,7 @@
     repo: deb [arch=amd64,arm64,ppc64el] http://mirror.hosting90.cz/mariadb/repo/10.4/ubuntu bionic main
     state: present
 
-# ~ shttps://askubuntu.com/a/1421959
+# ~ https://serverfault.com/a/1035431
 - name: Ensure MariaDB (MySQL) is installed
   become: true
   apt:
@@ -237,47 +237,83 @@
 
 - name: Clone the vegi-backend-api Git repo
   git:
-    repo: "https://{{ githubuser | urlencode }}:{{ githubpassword | urlencode }}@github.com/itsaboutpeepl/peepl-eat-api.git"
+    # repo: "https://{{ githubuser | urlencode }}:{{ githubpassword | urlencode }}@github.com/itsaboutpeepl/peepl-eat-api.git"
+    repo: "git@github.com:itsaboutpeepl/peepl-eat-api.git"
     dest: "/home/{{ ansible_user }}/peepl-eat-api"
-    version: QA
+    version: qa
     force: yes
 
-- name: Ensure remote URL does not contain credentials
-  git_config:
-    name: remote.origin.url
-    value: https://github.com/privrepo.git
-    scope: local
-    repo: "/home/{{ ansible_user }}/peepl-eat-api"
+# !Remove this step as we are now using ssh which avoids credentials
+# - name: Ensure remote URL does not contain credentials
+#   git_config:
+#     name: remote.origin.url
+#     value: https://github.com/privrepo.git
+#     scope: local
+#     repo: "/home/{{ ansible_user }}/peepl-eat-api"
 
 
 
 # Install Nodejs
 
-- name: "Add nodejs apt key"
+# - name: "Add nodejs apt key"
+#   become: true
+#   apt_key:
+#     url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+#     state: present
+
+# - name: Add Nodejs repo
+#   become: true
+#   shell: |
+#     curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+
+# # Use nvm instead :
+# - name: "Install nodejs"
+#   become: true
+#   apt:
+#     update_cache: yes
+#     name: nodejs
+#     state: present
+
+# Install Node Version Manager
+
+- name: Install nvm
+  git: repo=https://github.com/creationix/nvm.git dest=~/.nvm version=v0.39.2
+  tags: nvm
+
+- name: Source nvm in ~/.{{ item }}
+  lineinfile: >
+      dest=~/.{{ item }}
+      line="source ~/.nvm/nvm.sh"
+      create=yes
+  tags: nvm
+  with_items:
+    - bashrc
+    - profile
+
+- name: Install node and set version using nvm
   become: true
-  apt_key:
-    url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
-    state: present
+  become_user: "{{ ansible_user }}"
+  shell: "source ~/.nvm/nvm.sh && nvm install 12.22.12" 
+  args:
+    executable: /bin/bash
 
-- name: Add Nodejs repo
+- name: Check nvm installed
   become: true
-  shell: |
-    curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+  shell: "node -e \"console.log('Running Node.js ' + process.version)\"" # TODO: Pipe this output to stdout of ansible
+  args:
+    executable: /bin/bash
 
-- name: "Install nodejs"
+- name: Manually install npm packages
   become: true
-  apt:
-    update_cache: yes
-    name: nodejs
-    state: present
-
-
+  shell: "npm install /home/{{ ansible_user }}/peepl-eat-api"
+  args:
+    executable: /bin/bash
 
 # Install npm modules
-- name: Install packages based on package.json.
-  become: true
-  community.general.npm:
-    path: "/home/{{ ansible_user }}/peepl-eat-api"
+# - name: Install node packages based on package.json.
+#   become: true
+#   community.general.npm:
+#     path: "/home/{{ ansible_user }}/peepl-eat-api"
 
 - name: Install "pm2" node.js package globally.
   become: true
@@ -291,19 +327,11 @@
     name: sass
     global: yes
 
-# - name: Run the sails app in dev mode first to seed the database.
-# Run the app in dev once
+# ! had to kill the nginx manually first time to run from all the config error most likely using sudo fuser -k 80/tcp because of the error from running systemctl status nginx.service which gave me nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Unknown error) -> sudo netstat -tulpn | grep --color :80 ; sudo service nginx start
 - name: Start/reload server DEV to seed db (we are going to need to actually pull the data from the peepl db)
-  command: 'pm2 startOrReload ecosystem.config.js'
+  command: 'pm2 startOrReload ecosystem.config.js --env production'
+  # command: 'pm2 startOrReload ecosystem.config.js --env prod'
   args:
     chdir: /home/{{ ansible_user }}/peepl-eat-api
   environment:
-    NODE_ENV: ""
-
-# # Run the app
-# - name: Start/reload server
-#   command: 'pm2 startOrReload ecosystem.config.js --env prod'
-#   args:
-#     chdir: /home/{{ ansible_user }}/peepl-eat-api
-#   environment:
-#     NODE_ENV: "production"
+    NODE_ENV: "production" # use production to check that all works in a production environment
