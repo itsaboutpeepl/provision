@@ -140,6 +140,16 @@
     repo: deb [arch=amd64,arm64,ppc64el] http://mirror.hosting90.cz/mariadb/repo/10.4/ubuntu bionic main
     state: present
 
+- name: Manually configure libssl1.1 dependency for maria-db
+  become: true
+  shell: |
+    grep -qr "deb http://security.ubuntu.com/ubuntu focal-security main" /etc/apt/sources.list.d/focal-security.list && echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee /etc/apt/sources.list.d/focal-security.list || echo "already set focal-security"
+    apt update
+    aptitude install libssl1.1
+    apt install mariadb-server
+  args:
+    executable: /bin/bash
+
 # ~ https://serverfault.com/a/1035431
 - name: Ensure MariaDB (MySQL) is installed
   become: true
@@ -243,14 +253,16 @@
     version: main
     force: yes
 
-# !Remove this step as we are now using ssh which avoids credentials
-# - name: Ensure remote URL does not contain credentials
-#   git_config:
-#     name: remote.origin.url
-#     value: https://github.com/privrepo.git
-#     scope: local
-#     repo: "/home/{{ ansible_user }}/peepl-eat-api"
+#  ~ https://docs.ansible.com/ansible/latest/collections/ansible/builtin/copy_module.html#examples
+- name: Copy local.js secrets to server
+  ansible.builtin.copy:
+    src: /Users/joey/Github_Keep/shared_resources/secrets/local.js
+    dest: /home/ubuntu/peepl-eat-api/config/
 
+- name: Copy firebase-adminsdk secrets to server
+  ansible.builtin.copy:
+    src: /Users/joey/Github_Keep/shared_resources/secrets/vegiliverpool-firebase-adminsdk-4dfpz-8f01f888b3.json
+    dest: /home/ubuntu/peepl-eat-api/config/
 
 
 # Install Nodejs
@@ -297,17 +309,31 @@
   args:
     executable: /bin/bash
 
-- name: Check nvm installed
-  become: true
-  shell: "node -e \"console.log('Running Node.js ' + process.version)\"" # TODO: Pipe this output to stdout of ansible
-  args:
-    executable: /bin/bash
+# - name: Check nvm installed
+#   become: true
+#   # shell: "node -e \"console.log('Running Node.js ' + process.version)\"" # TODO: Pipe this output to stdout of ansible
+#   shell: "node --version"
+#   args:
+#     executable: /bin/bash
 
+
+# - name: Manually install npm packages
+#   become: true
+#   shell: "source ~/.bashrc && npm install /home/{{ ansible_user }}/peepl-eat-api"
+#   args:
+#     executable: /bin/bash
+
+# ~ https://stackoverflow.com/a/74374024
 - name: Manually install npm packages
-  become: true
-  shell: "npm install /home/{{ ansible_user }}/peepl-eat-api"
+  shell: |
+    source /home/ubuntu/.nvm/nvm.sh
+    npm install
+    npm install pm2 -g
+    npm install sass -g
+    npm install @sailshq/connect-redis@3.2.1 -g
   args:
     executable: /bin/bash
+    chdir: /home/{{ ansible_user }}/peepl-eat-api
 
 # Install npm modules
 # - name: Install node packages based on package.json.
@@ -315,23 +341,32 @@
 #   community.general.npm:
 #     path: "/home/{{ ansible_user }}/peepl-eat-api"
 
-- name: Install "pm2" node.js package globally.
-  become: true
-  community.general.npm:
-    name: pm2
-    global: yes
+# - name: Install "pm2" node.js package globally.
+#   become: true
+#   community.general.npm:
+#     name: pm2
+#     global: yes
   
-- name: Install "sass" node.js package globally.
-  become: true
-  community.general.npm:
-    name: sass
-    global: yes
-
-# ! had to kill the nginx manually first time to run from all the config error most likely using sudo fuser -k 80/tcp because of the error from running systemctl status nginx.service which gave me nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Unknown error) -> sudo netstat -tulpn | grep --color :80 ; sudo service nginx start
-- name: Start/reload server DEV to seed db (we are going to need to actually pull the data from the peepl db)
-  command: 'pm2 startOrReload ecosystem.config.js --env production'
-  # command: 'pm2 startOrReload ecosystem.config.js --env prod'
+# - name: Install "sass" node.js package globally.
+#   become: true
+#   community.general.npm:
+#     name: sass
+#     global: yes
+- name: Start/reload server to seed db
+  shell: |
+    source /home/ubuntu/.nvm/nvm.sh
+    pm2 startOrReload ecosystem.config.js --env production
   args:
+    executable: /bin/bash
     chdir: /home/{{ ansible_user }}/peepl-eat-api
   environment:
     NODE_ENV: "production" # use production to check that all works in a production environment
+
+# ! had to kill the nginx manually first time to run from all the config error most likely using sudo fuser -k 80/tcp because of the error from running systemctl status nginx.service which gave me nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Unknown error) -> sudo netstat -tulpn | grep --color :80 ; sudo service nginx start
+# - name: Start/reload server DEV to seed db (we are going to need to actually pull the data from the peepl db)
+#   command: '/home/ubuntu/.pm2/pm2 startOrReload ecosystem.config.js --env production'
+#   # command: 'pm2 startOrReload ecosystem.config.js --env prod'
+#   args:
+#     chdir: /home/{{ ansible_user }}/peepl-eat-api
+#   environment:
+#     NODE_ENV: "production" # use production to check that all works in a production environment
