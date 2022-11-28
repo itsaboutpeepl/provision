@@ -1,0 +1,36 @@
+---
+- name: Reload Nginx
+  become: yes
+  service:
+    name: nginx
+    state: reloaded
+
+- name: Restart Nginx
+  become: yes
+  service:
+    name: nginx
+    state: restarted
+
+# - name: Restart Redis
+#   become: yes
+#   systemd:
+#     name: redis-server
+#     state: restarted
+
+# - name: Start Redis
+#   become: yes
+#   systemd:
+#     name: redis-server
+#     state: started
+
+# - name: Stop Redis
+#   become: yes
+#   systemd:
+#     name: redis-server
+#     state: stopped
+
+# - name: Enable Redis
+#   become: yes
+#   systemd:
+#     name: redis-server
+#     enabled: yes
